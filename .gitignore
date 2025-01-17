@@ -1,0 +1,6 @@
+*.out
+*.osc
+build/
+.idea/
+dl/
+*.sqlite3

@@ -31,11 +31,20 @@ void parse_size(size_t size, char *buf, int buf_cap)
 		snprintf(buf, buf_cap, "%.1fGB", size / (float)GB_BYTES);
 }
 
-struct Node
+enum OSM_Element_Type
+{
+	NODE,
+	WAY,
+	RELATION
+};
+
+struct OSM_Element
 {
 	long id;
 	long version;
 	long changeset;
+	char *action;
+	enum OSM_Element_Type type;
 };
 
 bool streq(char *s1, char *s2)
@@ -43,41 +52,65 @@ bool streq(char *s1, char *s2)
 	return strcmp(s1, s2) == 0;
 }
 
-void node_attr_add(struct Node *node, char *attr_name, char *attr_val)
+void elem_attr_add(struct OSM_Element *elem, char *attr_name, char *attr_val)
 {
 	if (streq(attr_name, "id"))
-		node->id = strtol(attr_val, NULL, 10);
+		elem->id = strtol(attr_val, NULL, 10);
 	else if (streq(attr_name, "version"))
-		node->version = strtol(attr_val, NULL, 10);
+		elem->version = strtol(attr_val, NULL, 10);
 	else if (streq(attr_name, "changeset"))
-		node->changeset = strtol(attr_val, NULL, 10);
+		elem->changeset = strtol(attr_val, NULL, 10);
 }
 
-void sql_insert_node(const struct Node *node, sqlite3_stmt *stmt_node_insert)
-{
-	sqlite3_bind_int64(stmt_node_insert, 1, node->id);
-	sqlite3_bind_int64(stmt_node_insert, 2, node->version);
-	sqlite3_bind_int64(stmt_node_insert, 3, node->changeset);
+sqlite3_stmt *stmt_insert_node;
+sqlite3_stmt *stmt_insert_node_tag;
+sqlite3_stmt *stmt_insert_way;
+sqlite3_stmt *stmt_insert_way_node;
 
-	const int r = sqlite3_step(stmt_node_insert);
+void sql_insert_node_tag(long node_id, long node_version, char *k, char *v)
+{
+	sqlite3_bind_int64(stmt_insert_node_tag, 1, node_id);
+	sqlite3_bind_int64(stmt_insert_node_tag, 2, node_version);
+	sqlite3_bind_text(stmt_insert_node_tag, 3, k, -1, NULL);
+	sqlite3_bind_text(stmt_insert_node_tag, 4, v, -1, NULL);
+
+	const int r = sqlite3_step(stmt_insert_node_tag);
 	assert(r == SQLITE_DONE);
 
-	sqlite3_reset(stmt_node_insert);
-	sqlite3_clear_bindings(stmt_node_insert);
+	sqlite3_reset(stmt_insert_node_tag);
+	sqlite3_clear_bindings(stmt_insert_node_tag);
 }
 
-void sql_insert_node_tag(long node_id, long node_version, char *k, char *v, sqlite3_stmt *stmt_node_tag_insert)
+void sql_insert_way_node(long way_id, long way_version, long node_id)
 {
-	sqlite3_bind_int64(stmt_node_tag_insert, 1, node_id);
-	sqlite3_bind_int64(stmt_node_tag_insert, 2, node_version);
-	sqlite3_bind_text(stmt_node_tag_insert, 3, k, -1, NULL);
-	sqlite3_bind_text(stmt_node_tag_insert, 4, v, -1, NULL);
+	sqlite3_bind_int64(stmt_insert_way_node, 1, way_id);
+	sqlite3_bind_int64(stmt_insert_way_node, 2, way_version);
+	sqlite3_bind_int64(stmt_insert_way_node, 3, node_id);
 
-	const int r = sqlite3_step(stmt_node_tag_insert);
+	const int r = sqlite3_step(stmt_insert_way_node);
 	assert(r == SQLITE_DONE);
 
-	sqlite3_reset(stmt_node_tag_insert);
-	sqlite3_clear_bindings(stmt_node_tag_insert);
+	sqlite3_reset(stmt_insert_way_node);
+	sqlite3_clear_bindings(stmt_insert_way_node);
+}
+
+void sql_insert_elem(const struct OSM_Element *elem, char *action)
+{
+	sqlite3_stmt *stmt;
+	if (elem->type == NODE)
+		stmt = stmt_insert_node;
+	else
+		stmt = stmt_insert_way;
+	sqlite3_bind_int64(stmt, 1, elem->id);
+	sqlite3_bind_int64(stmt, 2, elem->version);
+	sqlite3_bind_int64(stmt, 3, elem->changeset);
+	sqlite3_bind_text(stmt, 4, action, -1, NULL);
+
+	const int r = sqlite3_step(stmt);
+	assert(r == SQLITE_DONE);
+
+	sqlite3_reset(stmt);
+	sqlite3_clear_bindings(stmt);
 }
 
 int main()
@@ -86,12 +119,12 @@ int main()
 	sqlite3_open("changes.sqlite3", &db);
 	sqlite3_exec(db, "BEGIN TRANSACTION;", NULL, NULL, NULL);
 
-	sqlite3_stmt *stmt_node_insert;
-	sqlite3_prepare_v2(db, "INSERT INTO nodes VALUES (?,?,?);", -1, &stmt_node_insert, NULL);
-	sqlite3_stmt *stmt_node_tag_insert;
-	sqlite3_prepare_v2(db, "INSERT INTO node_tags VALUES (?,?,?,?)", -1, &stmt_node_tag_insert, NULL);
+	sqlite3_prepare_v2(db, "INSERT INTO nodes VALUES (?,?,?,?);", -1, &stmt_insert_node, NULL);
+	sqlite3_prepare_v2(db, "INSERT INTO node_tags VALUES (?,?,?,?)", -1, &stmt_insert_node_tag, NULL);
+	sqlite3_prepare_v2(db, "INSERT INTO ways VALUES (?,?,?,?);", -1, &stmt_insert_way, NULL);
+	sqlite3_prepare_v2(db, "INSERT INTO way_nodes VALUES (?,?,?);", -1, &stmt_insert_way_node, NULL);
 
-	FILE *file = fopen("4490.osc", "r");
+	FILE *file = fopen("975.osc", "r");
 	assert(file);
 
 	fseek(file, 0L, SEEK_END);
@@ -118,7 +151,7 @@ int main()
 	char attr_name[128] = {0};
 	char attr_val[512] = {0};
 
-	struct Node node;
+	struct OSM_Element elem;
 	char node_tag_k[128];
 
 	printf("Parsing...\n");
@@ -159,8 +192,8 @@ int main()
 				fstack_push(&tags, tag_name, strlen(tag_name) + 1); // Start-tag '<tag>'
 			} else {
 				// End-tag '</tag>' (we have had some markup in-between)
-				if (streq(tag_name, "node"))
-					sql_insert_node(&node, stmt_node_insert);
+				if (streq(tag_name, "node") || streq(tag_name, "way"))
+					sql_insert_elem(&elem, fstack_n(&tags, 1));
 				fstack_down(&tags);
 			}
 			// fstack_print(&tags);
@@ -184,13 +217,25 @@ int main()
 		case ATTR_VAL:
 			if (c == '"') {
 				// val and name acquired now
-				if (streq(fstack_top(&tags), "node"))
-					node_attr_add(&node, attr_name, attr_val);
-				else if (streq(fstack_top(&tags), "tag") && streq(fstack_n(&tags, 1), "node")) {
+				char *top = fstack_top(&tags);
+				char *one_below = fstack_n(&tags, 1);
+				if (streq(top, "node")) {
+					// node
+					elem.type = NODE; // TODO:dumb
+					elem_attr_add(&elem, attr_name, attr_val);
+				} else if (streq(top, "taaag") && streq(one_below, "node")) {
+					// node -> tag
 					if (streq(attr_name, "k"))
 						strcpy(node_tag_k, attr_val);
 					else // "v"
-						sql_insert_node_tag(node.id, node.version, node_tag_k, attr_val, stmt_node_tag_insert);
+						sql_insert_node_tag(elem.id, elem.version, node_tag_k, attr_val);
+				} else if (streq(top, "way")) {
+					// way
+					elem.type = WAY; // TODO:dumb
+					elem_attr_add(&elem, attr_name, attr_val);
+				} else if (streq(top, "nd") && streq(one_below, "way")) {
+					// way -> nd
+					sql_insert_way_node(elem.id, elem.version, strtol(attr_val, NULL, 10));
 				}
 				memset(attr_val, '\0', sizeof(attr_val));
 				memset(attr_name, '\0', sizeof(attr_name));
@@ -208,8 +253,9 @@ int main()
 			if (c == '"')
 				break;
 			if (c == '/') { // End-tag with no markup in-between
-				if (streq(fstack_top(&tags), "node"))
-					sql_insert_node(&node, stmt_node_insert);
+				char *top = fstack_top(&tags);
+				if (streq(top, "node") || streq(top, "way"))
+					sql_insert_elem(&elem, fstack_n(&tags, 1));
 				fstack_down(&tags);
 			}
 			state = IDLE;
@@ -220,8 +266,8 @@ int main()
 	free(buf);
 	fclose(file);
 	sqlite3_exec(db, "COMMIT;", NULL, NULL, NULL);
-	sqlite3_finalize(stmt_node_insert);
-	sqlite3_finalize(stmt_node_tag_insert);
+	sqlite3_finalize(stmt_insert_node);
+	sqlite3_finalize(stmt_insert_node_tag);
 	sqlite3_close(db);
 	return 0;
 }

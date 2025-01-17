@@ -28,6 +28,8 @@ void *fstack_n(const struct FixedStack *stack, const size_t n_below)
 {
 	size_t record_n = stack->records;
 	const size_t target_n = record_n - n_below;
+	if (target_n == 0)
+		return NULL;
 	void *p = stack->top;
 	while (record_n-- >= target_n) {
 		p -= stack->record_sizes[record_n];
