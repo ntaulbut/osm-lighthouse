@@ -1,5 +1,6 @@
 *.out
 *.osc
+*.osm
 build/
 .idea/
 dl/
