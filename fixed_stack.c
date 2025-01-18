@@ -19,8 +19,12 @@ void fstack_push(struct FixedStack *stack, void *const data, const size_t data_s
 /* Get the top of the `stack` *without* popping it. */
 void *fstack_top(const struct FixedStack *stack)
 {
-	const size_t top_size = stack->record_sizes[stack->records - 1];
-	return stack->top - top_size;
+	if (stack->records > 0) {
+		const size_t top_size = stack->record_sizes[stack->records - 1];
+		return stack->top - top_size;
+	} else {
+		return stack->top;
+	}
 }
 
 /* Get the item `n_below` items below the top of the `stack`, without popping or moving the top down. */

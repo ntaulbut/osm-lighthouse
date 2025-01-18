@@ -7,29 +7,22 @@
 #define MB_BYTES 1048576
 #define GB_BYTES 1073741824
 
-enum OSM_Element_Type
-{
-	NODE,
-	WAY,
-	RELATION
-};
+struct OSM_Element;
+struct OSM_Changeset;
 
-struct OSM_Element
-{
-	long id;
-	long version;
-	long changeset;
-	char *action;
-	enum OSM_Element_Type type;
-};
-
-bool streq(char *s1, char *s2);
+bool streq(const char *s1, const char *s2);
 
 void parse_size(size_t size, char *buf, int buf_cap);
 
-void elem_attr_add(struct OSM_Element *elem, char *attr_name, char *attr_val);
+void elem_attr_add(struct OSM_Element *elem, const char *attr_name, const char *attr_val);
 
-bool is_osm_element(char *str);
+void sql_insert_changeset(struct OSM_Changeset *changeset);
+
+void sql_insert_changeset_tag(long changeset, char *k, char *v);
+
+void changeset_attr_add(struct OSM_Changeset *cs, const char *attr_name, const char *attr_val);
+
+bool is_osm_element(const char *str);
 
 void sql_insert_elem(const struct OSM_Element *elem, char *action);
 

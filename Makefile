@@ -2,7 +2,7 @@
 CC = gcc
 
 # Compiler flags
-CFLAGS = -Wall -p -g -O0
+CFLAGS = -Wall -O3
 
 # Target executable
 TARGET = build/loader
@@ -15,7 +15,7 @@ all: $(TARGET)
 
 # Rule to link object files into the final executable
 $(TARGET): $(OBJ)
-	$(CC) $(OBJ) -o $(TARGET) -O0 -p -g
+	$(CC) $(OBJ) -o $(TARGET) -O3
 
 # Rule to compile fixed_stack.o
 build/fixed_stack.o: fixed_stack.c
