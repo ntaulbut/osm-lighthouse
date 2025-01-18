@@ -266,7 +266,10 @@ void sql_insert_changeset(struct OSM_Changeset *cs)
 	// clang-format off
 	sqlite3_bind_int64(stmt,  1,  cs->id);
 	sqlite3_bind_text(stmt,   2,  cs->created_at, -1, NULL);
-	sqlite3_bind_text(stmt,   3,  cs->closed_at, -1, NULL);
+	if (!cs->open)
+		sqlite3_bind_text(stmt, 3, cs->closed_at, -1, NULL);
+	else
+		sqlite3_bind_null(stmt, 3);
 	sqlite3_bind_int(stmt,    4,  cs->open);
 	sqlite3_bind_text(stmt,   5,  cs->user, -1, NULL);
 	sqlite3_bind_int64(stmt,  6,  cs->uid);
@@ -331,10 +334,12 @@ void changeset_attr_add(struct OSM_Changeset *cs, const char *attr_name, const c
 		strcpy(cs->user, attr_val);
 
 	if (streq(attr_name, "open")) {
-		if (streq(attr_val, "true"))
+		if (streq(attr_val, "true")) {
 			cs->open = true;
-		else
+			cs->closed_at[0] = '\0';
+		} else {
 			cs->open = false;
+		}
 	}
 }
 
